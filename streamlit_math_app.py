@@ -1,25 +1,74 @@
-import os
-import json
-import base64
-import cv2
-import numpy as np
-import boto3
-from botocore.config import Config
+
 import streamlit as st
+from util.llm.deepseek_invoke import invoke_deepseek_model
+from util.llm.claude_invoke import invoke_claude_3_multimodal
+from util.llm.llama_invoke import invoke_llamma_multimodal
+from util.image_decode import get_image, process_image
 
 
-# Set up AWS client
-bedrock_config = Config(
-    signature_version='v4',
-    retries={
-        'max_attempts': 10,
-        'mode': 'standard'
-    }
-)
+def main():
+    st.title("Multimodel Math Question Solver on AWS")
+
+    input_method = st.radio("Choose input method:", ("Upload Image", "Enter Text"))
+    image_base64 = None
+    question_prompt = None
+
+    if input_method == "Upload Image":
+        uploaded_file = st.file_uploader("Choose an image of a math question. Consider option as well if present as part of image.", type=["jpg", "jpeg", "png"])
+        if uploaded_file is not None:
+            image = get_image(uploaded_file)
+            st.image(image, caption="Uploaded Image", use_column_width=True)
+            image_base64 = process_image(image)
+        else:
+            image_base64 = None
+    else:
+        image_base64 = None
+        question_prompt = st.text_area("Enter your math question:")
+
+    if st.button("Solve Question"):
+        if image_base64 or question_prompt is not None:
+            with st.spinner("Processing..."):
+                if input_method == "Upload Image":
+                    question_prompt = """
+                                        Please extract the question and it's options from the image. 
+                                        Also Clearly state the mathematical question presented in this image. 
+                                        Make use ot latex tag for any equations. 
+                                        Do not solve it or provide tips.
+                                        """
+                    question = invoke_model(question_prompt,SYSTEM_PROMPT, "claude", image_base64)
+                    st.subheader("Extracted Question:")
+                    st.write(question)
+                    answer_1 = solve_my_question(question=question, model="deepseek")
+                    st.subheader("Answer from Deepseek:")
+                    st.write(answer_1)
+
+                    answer_2 = solve_my_question(question=question, model="llama")
+                    st.subheader("Answer from Llama:")
+                    st.write(answer_2)
+
+                    st.subheader("Validation and Critique: (Claude)")
+                    validation_result = validate_my_answer(question, answer_1, answer_2, "claude")
+                    st.write(validation_result)
+                else:
+                    question = question_prompt
+                    st.subheader("Your Question:")
+                    st.write(question)
+                    answer_1 = solve_my_question(question=question, model="deepseek")
+                    st.subheader("Answer from DeepSeek:")
+                    st.write(answer_1)
+
+                    answer_2 = solve_my_question(question=question, model="llama")
+                    st.subheader("Answer from Llama:")
+                    st.write(answer_2)
+
+                    st.subheader("Validation and Critique: (Claude)")
+                    validation_result = validate_my_answer(question_prompt, answer_1, answer_2,"claude")
+                    st.write(validation_result)
+        else:
+            st.warning("Please upload an image or enter a question.")
 
 
-client = boto3.client('bedrock-runtime', config=bedrock_config)
-model_id = 'anthropic.claude-3-5-sonnet-20241022-v2:0'
+
 
 SYSTEM_PROMPT = """You are a J2EE math expert teacher, you will be getting math questions or doubts from variety of students in an image format. 
                     CAREFULLY Extract math question or doubt from it. Do not hallucinate. If you are unclear about any text, do not make assumption. 
@@ -31,7 +80,11 @@ SYSTEM_PROMPT = """You are a J2EE math expert teacher, you will be getting math 
                     When in doubt, please mention it clearly and do not showcase wrong concepts or solution, simply say I may need further assistance with this.
                     """
 
-text_prompt = """You are an J2EE entrance exam expert teacher helping student in solving their Math Problems..
+
+
+def solve_my_question(question, model):
+
+    user_prompt = f"""You are an J2EE entrance exam expert teacher helping student in solving their Math Problems..
                     You are helping student solve <question> mentioned below.
                     Provide clear step-by-step ways to solve the <question>.
                     For each step inside, break down each line with detailed steps to make it easier to understand solution.
@@ -49,150 +102,36 @@ text_prompt = """You are an J2EE entrance exam expert teacher helping student in
                     {question}
                     </question>
                 """
-
-llamma_prompt = """
-<|start_header_id|>system<|end_header_id|>
-{system_prompt}
-<|eot_id|>
-<|start_header_id|>user<|end_header_id|>
-{user_prompt}
-<|eot_id|>
-<|start_header_id|>assistant<|end_header_id|>
-"""
-
-def invoke_claude_3_multimodal(prompt, base64_image_data=None):
-    content = [{"type": "text", "text": prompt}]
-    if base64_image_data:
-        content.append({
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": "image/png",
-                "data": base64_image_data,
-            },
-        })
     
+    return invoke_model(user_prompt,system_prompt=SYSTEM_PROMPT, model=model)
 
-    request_body = {
-        "anthropic_version": "bedrock-2023-05-31",
-        "system": SYSTEM_PROMPT,
-        "max_tokens": 4096,
-        "temperature": 0,
-        "messages": [
-            {
-                "role": "user",
-                "content": content,
-            }
-        ],
-    }
+def validate_my_answer(question, answer_1, answer_2,model):
+    validate_prompt = f"""
+                        Please validate both the answers if it is correct and in case of wrong where exactly it made wrong decision with step-by-step instruction.
+                        
+                        Question: 
+                        
+                        {question}
 
-    response = client.invoke_model(
-        modelId=model_id,
-        body=json.dumps(request_body),
-    )
+                        Answer 1: 
+                        
+                        {answer_1}
+                        
+                        Answer 2:
 
-    result = json.loads(response.get("body").read())
-    return result['content'][0]['text']
-
-def invoke_llamma_multimodal(prompt, base64_image_data=None):
-
-    content = llamma_prompt.format(system_prompt=SYSTEM_PROMPT, user_prompt=prompt)
+                        {answer_2}
+                        
+                        """
     
-    if base64_image_data:
-        content.append({
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": "image/png",
-                "data": base64_image_data,
-            },
-        })
-    
+    return invoke_model(validate_prompt, SYSTEM_PROMPT, model)
 
-   # Create request body.
-    request_body = {
-        "prompt": content,
-        "max_gen_len": 1024,
-        "temperature": 0,
-        "top_p": 0.9
-    }
-
-    response = client.invoke_model(
-        #modelId="meta.llama3-2-90b-instruct-v1:0",
-        modelId="us.meta.llama3-2-90b-instruct-v1:0",
-        body=json.dumps(request_body),
-    )
-
-    
-    result = json.loads(response.get("body").read())
-    print(result)
-    return result['generation']
-
-
-
-
-def process_image(image):
-    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-    height, width = image.shape[:2]
-
-    if height > width:
-        image = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
-
-    max_dimension = 1000
-    if max(height, width) > max_dimension:
-        scale = max_dimension / max(height, width)
-        image = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
-
-    _, buffer = cv2.imencode('.jpg', image)
-    return base64.b64encode(buffer).decode('utf-8')
-
-def main():
-    st.title("Math Question Solver")
-
-    input_method = st.radio("Choose input method:", ("Upload Image", "Enter Text"))
-
-    if input_method == "Upload Image":
-        uploaded_file = st.file_uploader("Choose an image of a math question. Consider option as well if present as part of image.", type=["jpg", "jpeg", "png"])
-        if uploaded_file is not None:
-            image = cv2.imdecode(np.frombuffer(uploaded_file.read(), np.uint8), 1)
-            st.image(image, caption="Uploaded Image", use_column_width=True)
-            image_base64 = process_image(image)
-            question_prompt = "Please extract and clearly state the mathematical question presented in this image."
-        else:
-            image_base64 = None
-            question_prompt = None
-    else:
-        question_prompt = st.text_area("Enter your math question:")
-        image_base64 = None
-
-    if st.button("Solve Question"):
-        if question_prompt:
-            with st.spinner("Processing..."):
-                if input_method == "Upload Image":
-                    question = invoke_claude_3_multimodal(question_prompt, image_base64)
-                    st.subheader("Extracted Question:")
-                    st.write(question)
-                else:
-                    question = question_prompt
-                
-                text_prompt_updated = text_prompt.format(**{'question': question})
-
-                answer = invoke_claude_3_multimodal(text_prompt_updated)
-                st.subheader("Answer:")
-                st.write(answer)
-
-                validate_prompt = f"""
-                                    Question: {question}
-                                    Answer: {answer}
-                                    
-                                    Please validate the answer if it is correct and in case of wrong where exactly it made wrong decision with step-by-step instruction.
-                                    """
-                
-                validation = invoke_llamma_multimodal(validate_prompt)
-                st.subheader("Validation and Critique:")
-                st.write(validation)
-        else:
-            st.warning("Please upload an image or enter a question.")
+def invoke_model(prompt, system_prompt, model, base64_image_data=None):
+    if model == "claude":
+        return invoke_claude_3_multimodal(user_prompt=prompt, system_prompt=system_prompt, base64_image_data=base64_image_data)
+    elif model == "llama":
+        return invoke_llamma_multimodal(user_prompt=prompt, system_prompt=system_prompt, base64_image_data=base64_image_data)
+    elif model == "deepseek":
+        return invoke_deepseek_model(user_prompt=prompt, system_prompt=system_prompt)
 
 if __name__ == "__main__":
     main()
