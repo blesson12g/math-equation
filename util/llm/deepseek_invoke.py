@@ -52,7 +52,7 @@ def invoke_deepseek_model(user_prompt, system_prompt="", base64_image_data=None)
     }
 
     response = client.invoke_model(
-        modelId="arn:aws:bedrock:us-east-1:554544617756:imported-model/81bdrutjf968", #deepseek-distill-llama-70b
+        modelId="arn:aws:bedrock:us-east-1:030432703008:imported-model/8b6jrgn6667w", #deepseek-distill-llama-70b
         #modelId="arn:aws:bedrock:us-east-1:554544617756:imported-model/nn1nzb2i2qzb", #deepseek-distill-llama-8b
         body=json.dumps(request_body),
     )
