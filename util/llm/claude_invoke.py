@@ -13,7 +13,7 @@ bedrock_config = Config(
 
 
 client = boto3.client('bedrock-runtime', config=bedrock_config)
-model_id = 'anthropic.claude-3-5-sonnet-20241022-v2:0'
+model_id = 'anthropic.claude-3-5-sonnet-20240620-v1:0'
 
 def invoke_claude_3_multimodal(user_prompt,system_prompt="", base64_image_data=None):
     content = [{"type": "text", "text": user_prompt}]
