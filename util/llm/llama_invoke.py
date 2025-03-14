@@ -48,7 +48,7 @@ def invoke_llamma_multimodal(user_prompt, system_prompt="", base64_image_data=No
 
     response = client.invoke_model(
         #modelId="meta.llama3-2-90b-instruct-v1:0",
-        modelId="us.meta.llama3-3-70b-instruct-v1:0",
+        modelId="meta.llama3-8b-instruct-v1:0",
         #arn:aws:bedrock:us-west-2:554544617756:inference-profile/us.meta.llama3-3-70b-instruct-v1:0
         body=json.dumps(request_body),
     )
